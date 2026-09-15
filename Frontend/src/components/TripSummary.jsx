@@ -1,60 +1,68 @@
 import React from 'react';
 import { Route, Clock, BatteryMedium, MapPinCheck, CheckCircle2 } from 'lucide-react';
 
+function formatHours(hoursFloat) {
+  if (!hoursFloat && hoursFloat !== 0) return '0h 00m';
+  const h = Math.floor(hoursFloat);
+  const m = Math.round((hoursFloat - h) * 60);
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
 export default function TripSummary({ summary, isPlanned }) {
-  if (!isPlanned) {
+  if (!isPlanned || !summary) {
     return (
       <div className="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center shadow-2xs">
         <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400 mb-2">
           <Route className="w-5 h-5" />
         </div>
-        <h3 className="text-sm font-semibold text-slate-800">Trip Summary Awaiting Route Input</h3>
+        <h3 className="text-sm font-semibold text-slate-800">Trip Summary Awaiting Route Calculation</h3>
         <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-          Submit trip parameters or load a sample preset above to see route distance, driving estimates, and stop counts.
+          Enter trip locations and current cycle hours, then click "Plan Route" to generate real distance, driving duration, and HOS compliance metrics.
         </p>
       </div>
     );
   }
 
+  const counts = summary.counts || {};
   const cards = [
     {
       id: 'distance',
       label: 'Total Route Distance',
-      value: summary.totalDistance || '478.4 mi',
-      subtext: `${summary.highwayCorridor || 'I-65 Corridor'} (Truck Safe)`,
+      value: `${summary.total_distance_miles?.toLocaleString() || 0} mi`,
+      subtext: `Leg 1: ${summary.leg1_distance_miles || 0} mi • Leg 2: ${summary.leg2_distance_miles || 0} mi`,
       icon: Route,
       iconBg: 'bg-blue-50 text-blue-600',
-      badge: 'Practical Commercial Miles',
-      badgeColor: 'bg-slate-100 text-slate-700',
+      badge: `${summary.total_calendar_days || 1} Calendar Days`,
+      badgeColor: 'bg-blue-50 text-blue-700 border border-blue-200/60',
     },
     {
       id: 'driving-time',
-      label: 'Estimated Driving Time',
-      value: summary.drivingTime || '8h 15m',
-      subtext: `+${summary.onDutyTime || '1h 45m'} stops / loading`,
+      label: 'Total Driving Duration',
+      value: formatHours(summary.total_driving_hours),
+      subtext: `On-Duty Total: ${formatHours(summary.total_on_duty_hours)}`,
       icon: Clock,
       iconBg: 'bg-amber-50 text-amber-600',
-      badge: 'DOT 11h Limit OK',
+      badge: '11h Shift Limit Enforced',
       badgeColor: 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
     },
     {
       id: 'cycle-used',
       label: 'Current Cycle Used',
-      value: summary.cycleUsed || '42.5 hrs',
-      subtext: `${summary.cycleRemaining || '27.5 hrs'} remaining of 70h`,
+      value: `${summary.current_cycle_used_hours?.toFixed(1) || 0} hrs`,
+      subtext: `${summary.cycle_remaining_hours?.toFixed(1) || 0} hrs remaining of 70h`,
       icon: BatteryMedium,
       iconBg: 'bg-indigo-50 text-indigo-600',
-      badge: '70h / 8-Day Rule',
+      badge: '70h / 8-Day Cycle Rule',
       badgeColor: 'bg-indigo-50 text-indigo-700 border border-indigo-200/60',
     },
     {
       id: 'stops-count',
-      label: 'Planned Route Stops',
-      value: `${summary.stopsCount || 5} Stops`,
-      subtext: `${summary.fuelStops || 1} Fuel • ${summary.restStops || 1} DOT Rest`,
+      label: 'Scheduled Route Stops',
+      value: `${counts.total_stops || 0} Stops`,
+      subtext: `${counts.fuel_stops || 0} Fuel (≤1k mi) • ${counts.rest_breaks || 0} Break • ${counts.sleeper_rests || 0} Sleep`,
       icon: MapPinCheck,
       iconBg: 'bg-emerald-50 text-emerald-600',
-      badge: 'All Stops Compliant',
+      badge: 'FMCSA Part 395 Verified',
       badgeColor: 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
     },
   ];
@@ -67,7 +75,7 @@ export default function TripSummary({ summary, isPlanned }) {
         </h2>
         <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
           <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>HOS Feasible Route</span>
+          <span>Real Backend Calculated Route</span>
         </span>
       </div>
 
