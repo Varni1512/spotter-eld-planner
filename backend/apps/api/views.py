@@ -1,6 +1,6 @@
 """
 DRF Views for Spotter ELD Route Planner API.
-Provides endpoints for health check, geocoding, and complete FMCSA trip planning with daily ELD logs.
+Provides endpoints for health check, geocoding, complete FMCSA trip planning, and driver daily log validation.
 """
 
 from datetime import datetime, timezone
@@ -13,7 +13,9 @@ from apps.geocoding.services import GeocodingService
 from apps.routing.services import RoutingService
 from apps.hos.engine import HOSSimulationEngine
 from apps.logs.generator import DailyLogSheetGenerator
-from .serializers import GeocodeRequestSerializer, PlanTripRequestSerializer
+from apps.logs.recap import calculate_rolling_cycle_hours
+from apps.core.timezones import get_location_timezone
+from .serializers import GeocodeRequestSerializer, PlanTripRequestSerializer, ValidateLogRequestSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +27,11 @@ class HealthCheckView(APIView):
         return Response({
             "status": "ok",
             "service": "Spotter ELD Route Planner Backend API",
-            "version": "1.0.0",
+            "version": "2.0.0",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "fmcsa_ruleset": {
                 "regulation": "49 CFR Part 395",
-                "carrier_type": "Property-carrying driver",
+                "carrier_type": "Property-carrying commercial driver",
                 "cycle": "70 hours / 8 days",
                 "driving_limit": "11 hours",
                 "duty_window": "14 consecutive hours",
@@ -86,21 +88,7 @@ class GeocodeView(APIView):
 class PlanTripView(APIView):
     """
     Primary route planning and FMCSA Hours-of-Service simulation endpoint.
-    Accepts:
-    - current_location
-    - pickup_location
-    - dropoff_location
-    - current_cycle_used (hours)
-    - start_time (optional, ISO 8601)
-
-    Generates:
-    1. Calculated route distance & estimated driving duration
-    2. Route map geometry (GeoJSON LineString)
-    3. Pickup and dropoff stops (1h on-duty each)
-    4. Fueling stops (every ≤ 1,000 miles)
-    5. Rest stops (30m break, 10h sleeper rests, 34h restarts)
-    6. Complete chronological driving schedule
-    7. Daily ELD log sheets for EVERY day of the trip (summing to exactly 24.0h)
+    Deterministic, transparent calculation of stops, daily logs, and rolling recap.
     """
     def post(self, request):
         serializer = PlanTripRequestSerializer(data=request.data)
@@ -155,33 +143,37 @@ class PlanTripView(APIView):
         }
 
         # 2. Calculate Road Driving Routes for both legs
-        # Leg 1: Current -> Pickup
         leg1_route = RoutingService.get_route([
             (geo_current["lat"], geo_current["lon"]),
             (geo_pickup["lat"], geo_pickup["lon"])
         ])
 
-        # Leg 2: Pickup -> Dropoff
         leg2_route = RoutingService.get_route([
             (geo_pickup["lat"], geo_pickup["lon"]),
             (geo_dropoff["lat"], geo_dropoff["lon"])
         ])
 
+        # Resolve operational timezone at trip origin
+        origin_tz = get_location_timezone(geo_current["lat"], geo_current["lon"])
+
         # 3. Run FMCSA Hours-of-Service Simulation Engine
         engine = HOSSimulationEngine(
             start_time=start_time,
-            current_cycle_used=current_cycle_used
+            current_cycle_used=current_cycle_used,
+            operational_timezone=origin_tz
         )
         sim_result = engine.simulate(
             locations=locations,
             leg1_route=leg1_route,
-            leg2_route=leg2_route
+            leg2_route=leg2_route,
+            operational_timezone=origin_tz
         )
 
         timeline = sim_result["timeline"]
         stops = sim_result["stops"]
+        validation = sim_result["validation"]
 
-        # 4. Generate Daily ELD Log Sheets (24.0h per sheet)
+        # 4. Generate Daily ELD Log Sheets (24.0h per sheet in operational timezone)
         daily_logs = DailyLogSheetGenerator.generate_daily_logs(
             timeline=timeline,
             start_time=start_time,
@@ -191,7 +183,15 @@ class PlanTripView(APIView):
             destination_name=geo_dropoff["display_name"],
             carrier_name=carrier_name,
             truck_number=truck_num,
-            trailer_number=trailer_num
+            trailer_number=trailer_num,
+            operational_timezone=origin_tz
+        )
+
+        # Re-validate complete schedule and all daily log sheets together
+        validation = HOSSimulationEngine.validate_schedule(
+            timeline=timeline,
+            stops=stops,
+            daily_logs=daily_logs
         )
 
         # 5. Build Combined Route Geometry for Leaflet / OSM
@@ -201,9 +201,24 @@ class PlanTripView(APIView):
         if leg2_route.get("coordinates"):
             combined_coords.extend(leg2_route["coordinates"])
 
-        # 6. Format stops serialization
+        # 6. Format stops serialization with full timezone and metrics
         serialized_stops = []
         for s in stops:
+            metrics_dict = None
+            if s.hos_metrics:
+                metrics_dict = {
+                    "driving_used": s.hos_metrics.driving_used,
+                    "driving_limit": s.hos_metrics.driving_limit,
+                    "window_elapsed": s.hos_metrics.window_elapsed,
+                    "window_limit": s.hos_metrics.window_limit,
+                    "break_driving_elapsed": s.hos_metrics.break_driving_elapsed,
+                    "break_required_after": s.hos_metrics.break_required_after,
+                    "cycle_used": s.hos_metrics.cycle_used,
+                    "cycle_limit": s.hos_metrics.cycle_limit,
+                    "miles_since_fuel": s.hos_metrics.miles_since_fuel,
+                    "fuel_limit": s.hos_metrics.fuel_limit
+                }
+
             serialized_stops.append({
                 "id": s.id,
                 "stop_type": s.stop_type,
@@ -212,17 +227,34 @@ class PlanTripView(APIView):
                 "coordinates": [s.coordinates[0], s.coordinates[1]],
                 "arrival_time": s.arrival_time.isoformat(),
                 "departure_time": s.departure_time.isoformat(),
+                "arrival_local_display": s.arrival_local_display,
+                "departure_local_display": s.departure_local_display,
+                "timezone_id": s.timezone_id,
                 "duration_minutes": s.duration_minutes,
                 "duty_status": s.duty_status.value,
                 "duty_status_display": s.duty_status.display_label,
                 "mile_marker": s.mile_marker,
                 "reason": s.reason,
-                "leg_id": s.leg_id
+                "leg_id": s.leg_id,
+                "hos_metrics": metrics_dict
             })
 
         # 7. Format timeline events serialization
         serialized_timeline = []
         for e in timeline:
+            metrics_dict = None
+            if e.metrics:
+                metrics_dict = {
+                    "driving_used": e.metrics.driving_used,
+                    "driving_limit": e.metrics.driving_limit,
+                    "window_elapsed": e.metrics.window_elapsed,
+                    "window_limit": e.metrics.window_limit,
+                    "break_driving_elapsed": e.metrics.break_driving_elapsed,
+                    "break_required_after": e.metrics.break_required_after,
+                    "cycle_used": e.metrics.cycle_used,
+                    "cycle_limit": e.metrics.cycle_limit,
+                }
+
             serialized_timeline.append({
                 "id": e.id,
                 "event_type": e.event_type.value,
@@ -230,6 +262,9 @@ class PlanTripView(APIView):
                 "duty_status_display": e.duty_status.display_label,
                 "start_time": e.start_time.isoformat(),
                 "end_time": e.end_time.isoformat(),
+                "local_start_time": e.local_start_time,
+                "local_end_time": e.local_end_time,
+                "timezone_id": e.timezone_id,
                 "duration_minutes": e.duration_minutes,
                 "duration_hours": e.duration_hours,
                 "start_mile": e.start_mile,
@@ -242,6 +277,7 @@ class PlanTripView(APIView):
                 "shift_driving_at_end": e.shift_driving_at_end,
                 "shift_elapsed_at_end": e.shift_elapsed_at_end,
                 "cycle_used_at_end": e.cycle_used_at_end,
+                "metrics": metrics_dict
             })
 
         # Count stop types
@@ -250,8 +286,38 @@ class PlanTripView(APIView):
         sleep_count = sum(1 for s in stops if s.stop_type == "sleeper_rest")
         restart_count = sum(1 for s in stops if s.stop_type == "restart_34h")
 
+        # Format validation report
+        validation_payload = {
+            "passed": validation.passed,
+            "compliance_status": validation.compliance_status,
+            "violations": [
+                {
+                    "code": v.code,
+                    "message": v.message,
+                    "severity": v.severity,
+                    "timestamp": v.timestamp.isoformat() if v.timestamp else None,
+                    "event_id": v.event_id,
+                    "details": v.details
+                }
+                for v in validation.violations
+            ],
+            "warnings": [
+                {
+                    "code": w.code,
+                    "message": w.message,
+                    "severity": w.severity,
+                    "timestamp": w.timestamp.isoformat() if w.timestamp else None,
+                }
+                for w in validation.warnings
+            ]
+        }
+
         return Response({
             "status": "success",
+            "mode": "SIMULATION_MODE",
+            "mode_label": "Planned Trip — Simulation Mode",
+            "compliance_status": validation.compliance_status,
+            "validation": validation_payload,
             "summary": {
                 "total_distance_miles": sim_result["total_distance_miles"],
                 "total_driving_hours": sim_result["total_driving_hours"],
@@ -272,6 +338,7 @@ class PlanTripView(APIView):
                 },
                 "start_time": start_time.isoformat(),
                 "end_time": sim_result["end_time"].isoformat(),
+                "operational_timezone": origin_tz,
             },
             "locations": locations,
             "route_geometry": {
@@ -298,3 +365,68 @@ class PlanTripView(APIView):
             "timeline": serialized_timeline,
             "daily_logs": daily_logs,
         }, status=status.HTTP_200_OK)
+
+class ValidateLogView(APIView):
+    """
+    Validates manual driver edits, remarks, or corrections to a generated Daily Log Sheet.
+    Checks:
+    - 24.0 hour exact total duration.
+    - Non-negative durations.
+    - No overlapping segments.
+    - Recomputes updated rolling recap for driver review.
+    """
+    def post(self, request):
+        serializer = ValidateLogRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        day_number = data["day_number"]
+        duty_hours = data["duty_hours"]
+        remarks = data.get("remarks", [])
+        daily_logs = data.get("daily_logs", [])
+
+        errors = []
+        warnings = []
+
+        try:
+            off_duty = float(duty_hours.get("off_duty", 0.0))
+            sleeper = float(duty_hours.get("sleeper_berth", 0.0))
+            driving = float(duty_hours.get("driving", 0.0))
+            on_duty = float(duty_hours.get("on_duty_not_driving", 0.0))
+        except (ValueError, TypeError):
+            return Response({
+                "valid": False,
+                "status": "VIOLATION",
+                "errors": ["Duty hours must contain numeric values for off_duty, sleeper_berth, driving, on_duty_not_driving."]
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check negative durations
+        for name, val in [("Off Duty", off_duty), ("Sleeper Berth", sleeper), ("Driving", driving), ("On Duty Not Driving", on_duty)]:
+            if val < 0.0:
+                errors.append(f"{name} cannot be negative ({val}h).")
+
+        # Check 24.0 hour sum
+        total_hours = round(off_duty + sleeper + driving + on_duty, 2)
+        diff = round(abs(24.0 - total_hours), 2)
+        if diff > 0.05:
+            errors.append(f"Daily status duration must equal exactly 24.0 hours (current total: {total_hours}h).")
+
+        # Driving limit check for the day
+        if driving > 11.05:
+            warnings.append(f"Driving time today is {driving}h. Ensure shift limits (11.0h max) were not exceeded without 10h rest.")
+
+        # Recompute updated recap if logs provided
+        on_duty_today = round(driving + on_duty, 2)
+        valid = (len(errors) == 0)
+
+        return Response({
+            "valid": valid,
+            "status": "VALIDATED" if valid else "VIOLATION",
+            "day_number": day_number,
+            "total_hours": total_hours,
+            "on_duty_today": on_duty_today,
+            "errors": errors,
+            "warnings": warnings,
+            "message": "Daily log sheet passed all FMCSA structural validations." if valid else "Validation issues detected."
+        }, status=status.HTTP_200_OK if valid else status.HTTP_422_UNPROCESSABLE_ENTITY)

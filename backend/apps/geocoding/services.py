@@ -128,7 +128,7 @@ class GeocodingService:
                 "format": "json",
                 "zoom": 10,
             }
-            resp = requests.get(cls.REVERSE_URL, params=params, headers=cls.HEADERS, timeout=5)
+            resp = requests.get(cls.REVERSE_URL, params=params, headers=cls.HEADERS, timeout=1.5)
             if resp.status_code == 200:
                 data = resp.json()
                 addr = data.get("address", {})
@@ -148,4 +148,6 @@ class GeocodingService:
         except Exception as exc:
             logger.debug("Reverse geocoding failed for (%s, %s): %s", lat, lon, exc)
 
-        return f"{lat:.2f}, {lon:.2f}"
+        fallback = f"{lat:.2f}, {lon:.2f}"
+        _GEOCODE_CACHE[cache_key] = {"display_name": fallback}
+        return fallback

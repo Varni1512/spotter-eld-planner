@@ -1,11 +1,11 @@
 """
-Data models and Enums for FMCSA Hours of Service (Part 395).
+Data models, Enums, and Metrics for FMCSA Hours of Service (Part 395).
 """
 
 from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
 class DutyStatus(str, Enum):
     OFF_DUTY = "OFF_DUTY"                           # Line 1 on standard paper log
@@ -43,6 +43,20 @@ class EventType(str, Enum):
     POST_TRIP = "POST_TRIP"
 
 @dataclass
+class HOSMetrics:
+    """Transparent snapshot of FMCSA limits and used clocks at any decision point."""
+    driving_used: float = 0.0
+    driving_limit: float = 11.0
+    window_elapsed: float = 0.0
+    window_limit: float = 14.0
+    break_driving_elapsed: float = 0.0
+    break_required_after: float = 8.0
+    cycle_used: float = 0.0
+    cycle_limit: float = 70.0
+    miles_since_fuel: float = 0.0
+    fuel_limit: float = 1000.0
+
+@dataclass
 class TimelineEvent:
     id: str
     event_type: EventType
@@ -58,9 +72,13 @@ class TimelineEvent:
     coordinates: Tuple[float, float]
     remarks: str
     leg_id: int
+    timezone_id: str = "America/Chicago"
+    local_start_time: str = ""
+    local_end_time: str = ""
     shift_driving_at_end: float = 0.0
     shift_elapsed_at_end: float = 0.0
     cycle_used_at_end: float = 0.0
+    metrics: Optional[HOSMetrics] = None
 
 @dataclass
 class TripStop:
@@ -76,6 +94,10 @@ class TripStop:
     mile_marker: float
     reason: str
     leg_id: int = 1
+    timezone_id: str = "America/Chicago"
+    arrival_local_display: str = ""
+    departure_local_display: str = ""
+    hos_metrics: Optional[HOSMetrics] = None
 
 @dataclass
 class DriverClocks:
@@ -96,3 +118,25 @@ class DriverClocks:
         """Called after 34+ consecutive hours off-duty restart."""
         self.reset_shift()
         self.cycle_on_duty_hours = 0.0
+
+@dataclass
+class HOSViolation:
+    code: str
+    message: str
+    severity: str  # "VIOLATION" or "WARNING"
+    timestamp: Optional[datetime] = None
+    event_id: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+
+@dataclass
+class HOSValidationResult:
+    passed: bool
+    compliance_status: str # "HOS Plan Validated" or "Compliance Issue Detected"
+    violations: List[HOSViolation] = field(default_factory=list)
+    warnings: List[HOSViolation] = field(default_factory=list)
+
+class HOSConflictError(Exception):
+    """Raised when an illegal schedule or activity is detected in the HOS plan."""
+    def __init__(self, message: str, violation: Optional[HOSViolation] = None):
+        super().__init__(message)
+        self.violation = violation

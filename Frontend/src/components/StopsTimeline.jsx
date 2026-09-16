@@ -10,11 +10,20 @@ import {
   Milestone,
   Bed,
   RefreshCw,
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 
-function formatDateTime(isoString) {
-  if (!isoString) return '—';
-  const d = new Date(isoString);
+function formatDisplayTime(stop, type) {
+  if (type === 'arrival') {
+    if (stop.arrival_local_display) return stop.arrival_local_display;
+  } else {
+    if (stop.departure_local_display) return stop.departure_local_display;
+  }
+
+  const raw = type === 'arrival' ? stop.arrival_time : stop.departure_time;
+  if (!raw) return '—';
+  const d = new Date(raw);
   return d.toLocaleString([], {
     month: 'short',
     day: 'numeric',
@@ -102,13 +111,13 @@ export default function StopsTimeline({ stops = [], isPlanned }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200/90 shadow-xs overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+      <div className="px-5 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-slate-900">
             Planned Stops &amp; Timeline Schedule
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Chronological route segments with FMCSA compliance breaks, fueling, &amp; facility windows
+            Chronological route segments with FMCSA compliance breaks, fueling, &amp; facility windows (Location-synced IANA timestamps)
           </p>
         </div>
         <span className="text-xs font-medium px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
@@ -125,6 +134,9 @@ export default function StopsTimeline({ stops = [], isPlanned }) {
           <div className="space-y-6 sm:space-y-7">
             {stops.map((stop, index) => {
               const { icon: StopIcon, iconBg, badgeText, badgeStyle } = getStopTypeDetails(stop.stop_type);
+              const arrivalStr = formatDisplayTime(stop, 'arrival');
+              const departureStr = formatDisplayTime(stop, 'departure');
+              const isRestart = stop.stop_type === 'restart_34h';
 
               return (
                 <div key={stop.id || index} className="relative flex items-start gap-4 sm:gap-5 group">
@@ -132,11 +144,13 @@ export default function StopsTimeline({ stops = [], isPlanned }) {
                   <div
                     className={`relative z-10 w-8 h-8 sm:w-10 sm:h-10 rounded-full ${iconBg} flex items-center justify-center shadow-xs ring-4 ring-white shrink-0`}
                   >
-                    <StopIcon className="w-4 h-4 sm:w-4 sm:h-4" />
+                    <StopIcon className="w-4 h-4" />
                   </div>
 
                   {/* Stop Card Content */}
-                  <div className="flex-1 bg-slate-50/70 hover:bg-slate-50 border border-slate-200/80 rounded-xl p-4 sm:p-4.5 transition-all">
+                  <div className={`flex-1 border rounded-xl p-4 sm:p-4.5 transition-all ${
+                    isRestart ? 'bg-purple-50/40 border-purple-200' : 'bg-slate-50/70 hover:bg-slate-50 border-slate-200/80'
+                  }`}>
                     {/* Top row: Badge, Stop Title, and Mileage */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-2 border-b border-slate-200/60">
                       <div className="flex flex-wrap items-center gap-2">
@@ -167,12 +181,18 @@ export default function StopsTimeline({ stops = [], isPlanned }) {
                           <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                           <span>{stop.location_name}</span>
                         </div>
-                        <div className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                        <div className="text-xs text-slate-600 mt-2 flex flex-wrap items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>Arrival: <strong className="text-slate-800 font-semibold">{formatDateTime(stop.arrival_time)}</strong></span>
+                          <span>Arrival: <strong className="text-slate-900 font-semibold">{arrivalStr}</strong></span>
                           <span className="text-slate-300">•</span>
-                          <span>Departure: <strong className="text-slate-800 font-semibold">{formatDateTime(stop.departure_time)}</strong></span>
+                          <span>Departure: <strong className="text-slate-900 font-semibold">{departureStr}</strong></span>
                         </div>
+
+                        {stop.timezone_id && (
+                          <div className="text-[11px] text-slate-500 mt-1 pl-5">
+                            Local Timezone: <span className="font-mono text-slate-700">{stop.timezone_id}</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="bg-white rounded-lg border border-slate-200/70 p-2.5 text-xs flex flex-col justify-between">
@@ -187,8 +207,27 @@ export default function StopsTimeline({ stops = [], isPlanned }) {
                         <div className="text-[11px] text-slate-500">
                           Duty Status: <span className="font-semibold text-slate-700">{stop.duty_status_display || stop.duty_status}</span>
                         </div>
+
+                        {/* HOS decision clocks snapshot if attached */}
+                        {stop.hos_metrics && (
+                          <div className="text-[10px] text-slate-500 mt-1.5 pt-1 border-t border-slate-100 flex flex-wrap gap-2">
+                            <span>Drv Clock: <strong>{stop.hos_metrics.driving_used} / 11h</strong></span>
+                            <span>Window: <strong>{stop.hos_metrics.window_elapsed} / 14h</strong></span>
+                            <span>Cycle: <strong>{stop.hos_metrics.cycle_used} / 70h</strong></span>
+                          </div>
+                        )}
                       </div>
                     </div>
+
+                    {/* Special 34-Hour Restart Banner */}
+                    {isRestart && (
+                      <div className="mt-3 p-2.5 rounded-lg bg-purple-100/70 border border-purple-200 text-xs text-purple-900 flex items-start gap-2">
+                        <ShieldCheck className="w-4 h-4 text-purple-700 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>34-Hour Qualifying Cycle Restart:</strong> Driver is in continuous Sleeper Berth / Off Duty rest. Driving and on-duty activities are strictly prohibited until {departureStr}. Cycle resets to 70 hours immediately upon completion.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

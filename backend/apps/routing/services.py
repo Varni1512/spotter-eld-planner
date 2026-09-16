@@ -27,6 +27,8 @@ def haversine_distance(coord1: Tuple[float, float], coord2: Tuple[float, float])
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return EARTH_RADIUS_MILES * c
 
+_ROUTE_CACHE: Dict[str, Dict[str, Any]] = {}
+
 class RoutingService:
     OSRM_URL = "https://router.project-osrm.org/route/v1/driving"
     ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
@@ -36,12 +38,17 @@ class RoutingService:
         """
         Calculates driving route for waypoints: list of (lat, lon) tuples.
         Priority:
-        1. OpenRouteService API (using OPENROUTESERVICE_KEY)
-        2. OSRM Public Driving API
-        3. Haversine Geometry Fallback
+        1. Memory Cache
+        2. OpenRouteService API (using OPENROUTESERVICE_KEY)
+        3. OSRM Public Driving API
+        4. Haversine Geometry Fallback
         """
         if len(waypoints) < 2:
             raise ValueError("At least two waypoints (origin and destination) are required.")
+
+        cache_key = str([(round(lat, 3), round(lon, 3)) for lat, lon in waypoints])
+        if cache_key in _ROUTE_CACHE:
+            return _ROUTE_CACHE[cache_key]
 
         ors_key = os.environ.get("OPENROUTESERVICE_KEY", "").strip()
 
@@ -49,16 +56,20 @@ class RoutingService:
         if ors_key:
             ors_result = cls._call_openrouteservice(waypoints, ors_key)
             if ors_result:
+                _ROUTE_CACHE[cache_key] = ors_result
                 return ors_result
 
         # 2. Try OSRM Public Routing API
         osrm_result = cls._call_osrm(waypoints)
         if osrm_result:
+            _ROUTE_CACHE[cache_key] = osrm_result
             return osrm_result
 
         # 3. Fallback to Haversine
         logger.warning("External routing APIs unavailable, utilizing Haversine routing fallback")
-        return cls._haversine_fallback(waypoints)
+        h_res = cls._haversine_fallback(waypoints)
+        _ROUTE_CACHE[cache_key] = h_res
+        return h_res
 
     @classmethod
     def _call_openrouteservice(cls, waypoints: List[Tuple[float, float]], api_key: str) -> Optional[Dict[str, Any]]:
@@ -74,10 +85,10 @@ class RoutingService:
             body = {
                 "coordinates": coords,
                 "elevation": False,
-                "instructions": True,
+                "instructions": False,
             }
 
-            resp = requests.post(f"{cls.ORS_URL}/geojson", json=body, headers=headers, timeout=10)
+            resp = requests.post(f"{cls.ORS_URL}/geojson", json=body, headers=headers, timeout=(1.5, 2.5))
             if resp.status_code == 200:
                 data = resp.json()
                 features = data.get("features", [])
@@ -124,9 +135,9 @@ class RoutingService:
         """Call Open Source Routing Machine (OSRM) driving API."""
         try:
             coord_str = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in waypoints)
-            url = f"{cls.OSRM_URL}/{coord_str}?overview=full&geometries=geojson&steps=true"
+            url = f"{cls.OSRM_URL}/{coord_str}?overview=full&geometries=geojson&steps=false"
 
-            resp = requests.get(url, timeout=10)
+            resp = requests.get(url, timeout=(1.5, 2.5))
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("code") == "Ok" and data.get("routes"):

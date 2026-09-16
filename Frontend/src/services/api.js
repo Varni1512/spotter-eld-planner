@@ -47,3 +47,37 @@ export async function planTripApi({
 
   return await response.json();
 }
+
+export async function validateLogApi({
+  dayNumber,
+  dutyHours,
+  remarks = [],
+  dailyLogs = [],
+}) {
+  const payload = {
+    day_number: dayNumber,
+    duty_hours: dutyHours,
+    remarks: remarks,
+    daily_logs: dailyLogs,
+  };
+
+  const response = await fetch(`${API_BASE_URL}/validate-log/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return {
+      valid: false,
+      status: 'VIOLATION',
+      errors: data.errors || [data.error || `Validation failed (${response.status})`],
+      warnings: data.warnings || [],
+    };
+  }
+
+  return data;
+}

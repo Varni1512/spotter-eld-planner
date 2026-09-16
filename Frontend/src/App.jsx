@@ -26,6 +26,7 @@ function App() {
   const [routeGeometry, setRouteGeometry] = useState(null);
   const [stops, setStops] = useState([]);
   const [dailyLogs, setDailyLogs] = useState([]);
+  const [validation, setValidation] = useState(null);
 
   // Check backend health on mount (do not automatically plan a route)
   useEffect(() => {
@@ -49,6 +50,7 @@ function App() {
         setRouteGeometry(data.route_geometry);
         setStops(data.stops || []);
         setDailyLogs(data.daily_logs || []);
+        setValidation(data.validation || null);
         setIsPlanned(true);
         setIsBackendConnected(true);
       } else {
@@ -100,8 +102,11 @@ function App() {
     setRouteGeometry(null);
     setStops([]);
     setDailyLogs([]);
+    setValidation(null);
     setIsPlanned(false);
   };
+
+  const isCompliant = validation ? validation.passed : true;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-100 selection:text-blue-900">
@@ -130,13 +135,20 @@ function App() {
               ></span>
             </span>
             <p className="text-xs sm:text-sm text-slate-700">
-              <strong>Live Connected ELD Engine:</strong> Real road geometry via OSRM, automated FMCSA Hours of Service scheduling, and 24.0-hour daily log generation.
+              <strong>Planned Trip (Simulation Mode):</strong> Real road geometry via OSRM, automated FMCSA Hours of Service scheduling, and 24.0-hour daily log generation.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-            <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200">
-              49 CFR § 395 Compliant
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+            <span className="text-[11px] font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">
+              Simulation Mode
+            </span>
+            <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-md border ${
+              isCompliant
+                ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                : 'text-rose-700 bg-rose-50 border-rose-200'
+            }`}>
+              {validation?.compliance_status || '49 CFR § 395 Verified'}
             </span>
           </div>
         </div>
@@ -161,6 +173,7 @@ function App() {
             <TripSummary
               summary={tripSummary}
               isPlanned={isPlanned}
+              validation={validation}
             />
 
             {/* ROUTE MAP SECTION */}
@@ -187,6 +200,7 @@ function App() {
           <EldLogSection
             dailyLogs={dailyLogs}
             isPlanned={isPlanned}
+            validation={validation}
           />
         </section>
       </main>

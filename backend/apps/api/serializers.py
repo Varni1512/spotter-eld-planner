@@ -54,3 +54,9 @@ class PlanTripRequestSerializer(serializers.Serializer):
         if value < 0.0 or value > 70.0:
             raise serializers.ValidationError("Current cycle hours must be between 0.0 and 70.0 under FMCSA 70h/8d regulations.")
         return value
+
+class ValidateLogRequestSerializer(serializers.Serializer):
+    day_number = serializers.IntegerField(required=True, min_value=1)
+    duty_hours = serializers.DictField(required=True)
+    remarks = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    daily_logs = serializers.ListField(child=serializers.DictField(), required=False, default=list)

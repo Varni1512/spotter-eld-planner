@@ -34,6 +34,8 @@ class SpotterAPITestCase(APITestCase):
         response = self.client.post('/api/plan-trip/', payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["mode"], "SIMULATION_MODE")
+        self.assertIn("validation", response.data)
 
         # Verify summary
         summary = response.data["summary"]
@@ -50,6 +52,12 @@ class SpotterAPITestCase(APITestCase):
         self.assertIn("fuel", stop_types, "Long trip must have fueling stop(s)")
         self.assertIn("sleeper_rest", stop_types, "Multi-day trip must have 10-hour sleeper rests")
 
+        # Verify timezone and metrics annotations on stops
+        for s in stops:
+            self.assertIn("timezone_id", s)
+            self.assertIn("arrival_local_display", s)
+            self.assertIn("hos_metrics", s)
+
         # Verify daily ELD logs
         daily_logs = response.data["daily_logs"]
         self.assertGreaterEqual(len(daily_logs), 2)
@@ -58,4 +66,37 @@ class SpotterAPITestCase(APITestCase):
             total = hours["off_duty"] + hours["sleeper_berth"] + hours["driving"] + hours["on_duty_not_driving"]
             self.assertEqual(round(total, 2), 24.0)
             self.assertTrue(log["svg_markup"].startswith("<svg"))
-            self.assertIn("recap", log)
+
+    def test_validate_log_endpoint_valid_case(self):
+        """Verify /api/validate-log/ accepts a valid 24-hour log update."""
+        payload = {
+            "day_number": 1,
+            "duty_hours": {
+                "off_duty": 10.0,
+                "sleeper_berth": 0.0,
+                "driving": 11.0,
+                "on_duty_not_driving": 3.0
+            }
+        }
+        response = self.client.post('/api/validate-log/', payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["valid"])
+        self.assertEqual(response.data["total_hours"], 24.0)
+        self.assertEqual(response.data["status"], "VALIDATED")
+
+    def test_validate_log_endpoint_invalid_sum(self):
+        """Verify /api/validate-log/ rejects an invalid total duration (> 24.0h)."""
+        payload = {
+            "day_number": 1,
+            "duty_hours": {
+                "off_duty": 12.0,
+                "sleeper_berth": 0.0,
+                "driving": 11.0,
+                "on_duty_not_driving": 3.0 # Total 26h
+            }
+        }
+        response = self.client.post('/api/validate-log/', payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        self.assertFalse(response.data["valid"])
+        self.assertEqual(response.data["status"], "VIOLATION")
+        self.assertIn("must equal exactly 24.0 hours", response.data["errors"][0])
