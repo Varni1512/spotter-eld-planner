@@ -188,10 +188,12 @@ class PlanTripView(APIView):
         )
 
         # Re-validate complete schedule and all daily log sheets together
+        has_sufficient_history = (current_cycle_used > 0.0)
         validation = HOSSimulationEngine.validate_schedule(
             timeline=timeline,
             stops=stops,
-            daily_logs=daily_logs
+            daily_logs=daily_logs,
+            has_sufficient_history=has_sufficient_history
         )
 
         # 5. Build Combined Route Geometry for Leaflet / OSM
@@ -290,6 +292,9 @@ class PlanTripView(APIView):
         validation_payload = {
             "passed": validation.passed,
             "compliance_status": validation.compliance_status,
+            "has_sufficient_history": validation.has_sufficient_history,
+            "status_type": validation.status_type,
+            "explanation": validation.explanation,
             "violations": [
                 {
                     "code": v.code,
@@ -307,6 +312,7 @@ class PlanTripView(APIView):
                     "message": w.message,
                     "severity": w.severity,
                     "timestamp": w.timestamp.isoformat() if w.timestamp else None,
+                    "details": getattr(w, "details", None)
                 }
                 for w in validation.warnings
             ]

@@ -364,5 +364,85 @@ class HOSTestCase(TestCase):
             )
 
         self.assertTrue(val_res.passed, f"Validation should pass, but got violations: {[v.message for v in val_res.violations]}")
-        self.assertEqual(val_res.compliance_status, "HOS Plan Validated")
+        # Without prior 7-day logs entered, status informs that historical data is required
+        self.assertEqual(val_res.compliance_status, "Generated Trip Validated — Historical 70/8 Data Required")
+        self.assertFalse(val_res.has_sufficient_history)
+        self.assertEqual(val_res.status_type, "WARNING")
+
+    # ==================== HISTORICAL 70/8 DATA VALIDATION TESTS ====================
+
+    def test_no_historical_logs_returns_incomplete_cycle_validation_status(self):
+        """
+        Verify that when prior 7-day logs are unavailable (current_cycle_used == 0.0),
+        validation status is 'Generated Trip Validated — Historical 70/8 Data Required'
+        with status_type 'WARNING' and an INSUFFICIENT_HISTORICAL_DATA warning.
+        """
+        fake_daily_logs = [
+            {
+                "day_number": 1,
+                "duty_hours": {"driving": 8.0, "on_duty_not_driving": 2.0, "off_duty": 14.0, "sleeper_berth": 0.0},
+                "recap": {"has_sufficient_history": False, "historical_hours_used": 0.0, "total_recap_hours": 10.0}
+            }
+        ]
+        result = HOSSimulationEngine.validate_schedule(
+            timeline=[],
+            stops=[],
+            daily_logs=fake_daily_logs,
+            has_sufficient_history=False
+        )
+        self.assertTrue(result.passed, "Driver review must not be blocked when daily rules pass")
+        self.assertFalse(result.has_sufficient_history)
+        self.assertEqual(result.compliance_status, "Generated Trip Validated — Historical 70/8 Data Required")
+        self.assertEqual(result.status_type, "WARNING")
+        self.assertIn("Full 70/8 cycle compliance requires prior 7-day driver logs", result.explanation)
+        w_codes = [w.code for w in result.warnings]
+        self.assertIn("INSUFFICIENT_HISTORICAL_DATA", w_codes)
+
+    def test_historical_logs_available_returns_full_rolling_recap_validation(self):
+        """
+        Verify that when prior 7-day logs are available (current_cycle_used > 0.0),
+        validation status is 'HOS Plan Validated' with status_type 'VALIDATED'.
+        """
+        fake_daily_logs = [
+            {
+                "day_number": 1,
+                "duty_hours": {"driving": 8.0, "on_duty_not_driving": 2.0, "off_duty": 14.0, "sleeper_berth": 0.0},
+                "recap": {"has_sufficient_history": True, "historical_hours_used": 24.0, "total_recap_hours": 34.0}
+            }
+        ]
+        result = HOSSimulationEngine.validate_schedule(
+            timeline=[],
+            stops=[],
+            daily_logs=fake_daily_logs,
+            has_sufficient_history=True
+        )
+        self.assertTrue(result.passed)
+        self.assertTrue(result.has_sufficient_history)
+        self.assertEqual(result.compliance_status, "HOS Plan Validated")
+        self.assertEqual(result.status_type, "VALIDATED")
+        self.assertEqual(len(result.warnings), 0)
+
+    def test_daily_driving_limit_remains_independently_validated_even_without_history(self):
+        """
+        Verify that even without historical data, daily driving violations (> 11.0h)
+        are independently detected, mark passed=False, and set status to 'Compliance Issue Detected'.
+        """
+        fake_daily_logs = [
+            {
+                "day_number": 1,
+                "duty_hours": {"driving": 12.0, "on_duty_not_driving": 2.0, "off_duty": 10.0, "sleeper_berth": 0.0},
+                "recap": {"has_sufficient_history": False, "historical_hours_used": 0.0, "total_recap_hours": 14.0}
+            }
+        ]
+        result = HOSSimulationEngine.validate_schedule(
+            timeline=[],
+            stops=[],
+            daily_logs=fake_daily_logs,
+            has_sufficient_history=False
+        )
+        self.assertFalse(result.passed, "Daily driving > 11h must fail validation")
+        self.assertEqual(result.compliance_status, "Compliance Issue Detected")
+        self.assertEqual(result.status_type, "ERROR")
+        v_codes = [v.code for v in result.violations]
+        self.assertIn("DAILY_DRIVING_LIMIT_EXCEEDED", v_codes)
 

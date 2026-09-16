@@ -226,7 +226,8 @@ class HOSSimulationEngine:
         )
 
         # Run rigorous HOS validation checks on the generated schedule
-        validation_result = self.validate_schedule(self.timeline, self.stops)
+        has_history = (self.clocks.cycle_on_duty_hours > 0.0)
+        validation_result = self.validate_schedule(self.timeline, self.stops, has_sufficient_history=has_history)
 
         # Compute summary metrics
         total_driving_minutes = sum(e.duration_minutes for e in self.timeline if e.duty_status == DutyStatus.DRIVING)
@@ -713,7 +714,8 @@ class HOSSimulationEngine:
         cls,
         timeline: List[TimelineEvent],
         stops: List[TripStop],
-        daily_logs: Optional[List[Dict[str, Any]]] = None
+        daily_logs: Optional[List[Dict[str, Any]]] = None,
+        has_sufficient_history: Optional[bool] = None
     ) -> HOSValidationResult:
         """
         Rigorous HOS rule validation verifying:
@@ -723,6 +725,7 @@ class HOSSimulationEngine:
         4. 30-minute break after 8 cumulative hours driving.
         5. Chronological continuity without negative durations.
         6. Daily calendar day driving limits (≤ 11.0 hours per daily sheet).
+        7. Incomplete 70/8 historical cycle status when prior 7-day driver logs are absent.
         """
         violations: List[HOSViolation] = []
         warnings: List[HOSViolation] = []
@@ -816,12 +819,39 @@ class HOSSimulationEngine:
                         details={"day_number": day.get("day_number"), "driving_hours": d_hours, "limit": 11.0}
                     ))
 
+        # Resolve whether historical data is available
+        if has_sufficient_history is None:
+            if daily_logs and len(daily_logs) > 0:
+                recap_info = daily_logs[0].get("recap", {})
+                has_sufficient_history = recap_info.get("has_sufficient_history", True)
+            else:
+                has_sufficient_history = True
+
         passed = (len(violations) == 0)
-        compliance_status = "HOS Plan Validated" if passed else "Compliance Issue Detected"
+        if not passed:
+            compliance_status = "Compliance Issue Detected"
+            status_type = "ERROR"
+            explanation = "One or more FMCSA Hours-of-Service violations were detected in the schedule."
+        elif not has_sufficient_history:
+            compliance_status = "Generated Trip Validated — Historical 70/8 Data Required"
+            status_type = "WARNING"
+            explanation = "Daily driving and generated-trip rules were validated. Full 70/8 cycle compliance requires prior 7-day driver logs."
+            warnings.append(HOSViolation(
+                code="INSUFFICIENT_HISTORICAL_DATA",
+                message=explanation,
+                severity="WARNING"
+            ))
+        else:
+            compliance_status = "HOS Plan Validated"
+            status_type = "VALIDATED"
+            explanation = "All FMCSA Part 395 rules and 70-hour / 8-day rolling cycle requirements validated successfully."
 
         return HOSValidationResult(
             passed=passed,
             compliance_status=compliance_status,
             violations=violations,
-            warnings=warnings
+            warnings=warnings,
+            has_sufficient_history=has_sufficient_history,
+            status_type=status_type,
+            explanation=explanation
         )

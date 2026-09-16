@@ -107,6 +107,7 @@ function App() {
   };
 
   const isCompliant = validation ? validation.passed : true;
+  const isWarningState = isCompliant && (validation?.status_type === 'WARNING' || validation?.has_sufficient_history === false);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-100 selection:text-blue-900">
@@ -144,9 +145,11 @@ function App() {
               Simulation Mode
             </span>
             <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-md border ${
-              isCompliant
-                ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                : 'text-rose-700 bg-rose-50 border-rose-200'
+              !isCompliant
+                ? 'text-rose-700 bg-rose-50 border-rose-200'
+                : isWarningState
+                ? 'text-amber-800 bg-amber-50 border-amber-300'
+                : 'text-emerald-700 bg-emerald-50 border-emerald-200'
             }`}>
               {validation?.compliance_status || '49 CFR § 395 Verified'}
             </span>

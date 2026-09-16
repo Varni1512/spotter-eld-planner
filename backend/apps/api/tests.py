@@ -58,6 +58,13 @@ class SpotterAPITestCase(APITestCase):
             self.assertIn("arrival_local_display", s)
             self.assertIn("hos_metrics", s)
 
+        # Verify validation fields
+        val = response.data["validation"]
+        self.assertTrue(val["passed"])
+        self.assertEqual(val["compliance_status"], "HOS Plan Validated")
+        self.assertEqual(val["status_type"], "VALIDATED")
+        self.assertTrue(val["has_sufficient_history"])
+
         # Verify daily ELD logs
         daily_logs = response.data["daily_logs"]
         self.assertGreaterEqual(len(daily_logs), 2)
@@ -66,6 +73,25 @@ class SpotterAPITestCase(APITestCase):
             total = hours["off_duty"] + hours["sleeper_berth"] + hours["driving"] + hours["on_duty_not_driving"]
             self.assertEqual(round(total, 2), 24.0)
             self.assertTrue(log["svg_markup"].startswith("<svg"))
+
+    def test_plan_trip_insufficient_history_status(self):
+        """Verify that when current_cycle_used is 0.0, API returns incomplete 70/8 cycle warning status."""
+        payload = {
+            "current_location": "Chicago, IL",
+            "pickup_location": "Dallas, TX",
+            "dropoff_location": "Atlanta, GA",
+            "current_cycle_used": 0.0,
+            "start_time": "2026-09-15T08:00:00Z"
+        }
+        response = self.client.post('/api/plan-trip/', payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        val = response.data["validation"]
+        self.assertTrue(val["passed"])
+        self.assertFalse(val["has_sufficient_history"])
+        self.assertEqual(val["compliance_status"], "Generated Trip Validated — Historical 70/8 Data Required")
+        self.assertEqual(val["status_type"], "WARNING")
+        self.assertIn("Full 70/8 cycle compliance requires prior 7-day driver logs", val["explanation"])
+        self.assertTrue(any(w["code"] == "INSUFFICIENT_HISTORICAL_DATA" for w in val["warnings"]))
 
     def test_validate_log_endpoint_valid_case(self):
         """Verify /api/validate-log/ accepts a valid 24-hour log update."""

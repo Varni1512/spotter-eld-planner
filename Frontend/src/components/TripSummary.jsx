@@ -27,7 +27,12 @@ export default function TripSummary({ summary, isPlanned, validation }) {
 
   const counts = summary.counts || {};
   const isCompliant = validation ? validation.passed : true;
-  const complianceStatusText = validation?.compliance_status || (isCompliant ? 'HOS Plan Validated' : 'Compliance Issue Detected');
+  const isWarningState = isCompliant && (validation?.status_type === 'WARNING' || validation?.has_sufficient_history === false);
+  const complianceStatusText = validation?.compliance_status || (
+    isCompliant
+      ? (isWarningState ? 'Generated Trip Validated — Historical 70/8 Data Required' : 'HOS Plan Validated')
+      : 'Compliance Issue Detected'
+  );
   const isDailyLimitExceeded = validation?.violations?.some(
     (v) => v.code === 'DAILY_DRIVING_LIMIT_EXCEEDED' || v.code === '11H_DRIVING_LIMIT'
   );
@@ -40,6 +45,7 @@ export default function TripSummary({ summary, isPlanned, validation }) {
       subtext: `Leg 1: ${summary.leg1_distance_miles || 0} mi • Leg 2: ${summary.leg2_distance_miles || 0} mi`,
       icon: Route,
       iconBg: 'bg-blue-50 text-blue-600',
+      dotColor: 'bg-blue-500',
       badge: `${summary.total_calendar_days || 1} Calendar Days`,
       badgeColor: 'bg-blue-50 text-blue-700 border border-blue-200/60',
     },
@@ -47,10 +53,11 @@ export default function TripSummary({ summary, isPlanned, validation }) {
       id: 'driving-time',
       label: 'Total Driving Duration',
       value: formatHours(summary.total_driving_hours),
-      subtext: `On-Duty Total: ${formatHours(summary.total_on_duty_hours)}`,
+      subtext: `On-Duty: ${formatHours(summary.total_on_duty_hours)}`,
       icon: Clock,
       iconBg: 'bg-amber-50 text-amber-600',
-      badge: isDailyLimitExceeded ? '11h Limit Exceeded' : '11h Shift Limit Enforced',
+      dotColor: isDailyLimitExceeded ? 'bg-rose-500' : 'bg-emerald-500',
+      badge: isDailyLimitExceeded ? '11h Limit Exceeded' : '11h Shift Limit',
       badgeColor: isDailyLimitExceeded
         ? 'bg-rose-50 text-rose-700 border border-rose-200/60 font-semibold'
         : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
@@ -59,22 +66,30 @@ export default function TripSummary({ summary, isPlanned, validation }) {
       id: 'cycle-used',
       label: 'Current Cycle Used',
       value: `${summary.current_cycle_used_hours?.toFixed(1) || 0} hrs`,
-      subtext: `${summary.cycle_remaining_hours?.toFixed(1) || 0} hrs remaining of 70h`,
+      subtext: `${summary.cycle_remaining_hours?.toFixed(1) || 0}h left of 70h`,
       icon: BatteryMedium,
       iconBg: 'bg-indigo-50 text-indigo-600',
-      badge: '70h / 8-Day Cycle Rule',
-      badgeColor: 'bg-indigo-50 text-indigo-700 border border-indigo-200/60',
+      dotColor: isWarningState ? 'bg-amber-500' : 'bg-indigo-500',
+      badge: isWarningState ? 'Trip History Only' : '70h / 8-Day Cycle',
+      badgeColor: isWarningState
+        ? 'bg-amber-50 text-amber-800 border border-amber-200/80'
+        : 'bg-indigo-50 text-indigo-700 border border-indigo-200/60',
     },
     {
       id: 'stops-count',
       label: 'Scheduled Route Stops',
       value: `${counts.total_stops || 0} Stops`,
-      subtext: `${counts.fuel_stops || 0} Fuel (≤1k mi) • ${counts.rest_breaks || 0} Break • ${counts.sleeper_rests || 0} Sleep`,
+      subtext: `${counts.fuel_stops || 0} Fuel • ${counts.rest_breaks || 0} Break • ${counts.sleeper_rests || 0} Sleep`,
       icon: MapPinCheck,
       iconBg: 'bg-emerald-50 text-emerald-600',
-      badge: isCompliant ? 'FMCSA Part 395 Verified' : 'Review Required',
+      dotColor: isCompliant ? (isWarningState ? 'bg-amber-500' : 'bg-emerald-500') : 'bg-rose-500',
+      badge: isCompliant
+        ? (isWarningState ? 'Generated Trip' : 'Part 395 Verified')
+        : 'Review Required',
       badgeColor: isCompliant
-        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+        ? (isWarningState
+            ? 'bg-amber-50 text-amber-800 border border-amber-200/80'
+            : 'bg-emerald-50 text-emerald-700 border border-emerald-200/60')
         : 'bg-rose-50 text-rose-700 border border-rose-200/60',
     },
   ];
@@ -90,15 +105,19 @@ export default function TripSummary({ summary, isPlanned, validation }) {
           {/* Dynamic Compliance Badge */}
           <span
             className={`text-xs font-semibold px-2.5 py-1 rounded-md border flex items-center gap-1.5 ${
-              isCompliant
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : 'bg-rose-50 text-rose-700 border-rose-200'
+              !isCompliant
+                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                : isWarningState
+                ? 'bg-amber-50 text-amber-800 border-amber-300'
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
             }`}
           >
-            {isCompliant ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-            ) : (
+            {!isCompliant ? (
               <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+            ) : isWarningState ? (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
             )}
             <span>{complianceStatusText}</span>
           </span>
@@ -114,6 +133,19 @@ export default function TripSummary({ summary, isPlanned, validation }) {
           </button>
         </div>
       </div>
+
+      {/* Prominent Insufficient Historical Data Warning Banner */}
+      {isCompliant && isWarningState && (
+        <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-3.5 text-xs space-y-1 animate-in fade-in">
+          <div className="flex items-center gap-2 font-bold text-amber-900">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>Generated Trip Validated — Historical 70/8 Data Required</span>
+          </div>
+          <p className="text-amber-800 leading-relaxed pl-6">
+            Daily driving and generated-trip rules were validated. Full 70/8 cycle compliance requires prior 7-day driver logs.
+          </p>
+        </div>
+      )}
 
       {/* Prominent HOS Violations Banner */}
       {!isCompliant && validation?.violations?.length > 0 && (
@@ -134,58 +166,66 @@ export default function TripSummary({ summary, isPlanned, validation }) {
 
       {/* Expandable HOS Rule Transparency Drawer */}
       {showHOSDetails && (
-        <div className="bg-slate-900 text-slate-100 rounded-xl p-4 shadow-sm border border-slate-800 text-xs animate-in fade-in duration-200 space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span className="font-semibold text-sm flex items-center gap-1.5 text-white">
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
+        <div className="bg-white rounded-xl p-4 shadow-xs border border-slate-200 text-xs animate-in fade-in duration-200 space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+            <span className="font-semibold text-sm flex items-center gap-1.5 text-slate-800">
+              <ShieldCheck className="w-4 h-4 text-blue-600" />
               FMCSA 49 CFR Part 395 Deterministic Calculation Limits
             </span>
-            <span className="text-[11px] text-slate-400">Property-Carrying Standard</span>
+            <span className="text-[11px] text-slate-500 font-medium">Property-Carrying Standard</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-700/60">
-              <div className="text-slate-400 font-medium">11-Hour Driving Limit</div>
-              <div className="text-sm font-bold text-white mt-1">11.00 hrs max per shift</div>
-              <div className="text-[11px] text-slate-400 mt-1">Driving stops automatically and schedules 10h rest upon reaching 11h.</div>
-              <div className="text-[10px] font-semibold text-emerald-400 mt-2">STATUS: STRICTLY ENFORCED</div>
+            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-200/70">
+              <div className="text-slate-500 font-medium">11-Hour Driving Limit</div>
+              <div className="text-sm font-bold text-slate-900 mt-1">11.00 hrs max per shift</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">Driving stops automatically and schedules 10h rest upon reaching 11h.</div>
+              <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-md inline-block mt-2">
+                STATUS: STRICTLY ENFORCED
+              </div>
             </div>
 
-            <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-700/60">
-              <div className="text-slate-400 font-medium">14-Hour Duty Window</div>
-              <div className="text-sm font-bold text-white mt-1">14.00 consecutive hrs</div>
-              <div className="text-[11px] text-slate-400 mt-1">Cannot drive after 14th hour following 10 consecutive hours off-duty.</div>
-              <div className="text-[10px] font-semibold text-emerald-400 mt-2">STATUS: STRICTLY ENFORCED</div>
+            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-200/70">
+              <div className="text-slate-500 font-medium">14-Hour Duty Window</div>
+              <div className="text-sm font-bold text-slate-900 mt-1">14.00 consecutive hrs</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">Cannot drive after 14th hour following 10 consecutive hours off-duty.</div>
+              <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-md inline-block mt-2">
+                STATUS: STRICTLY ENFORCED
+              </div>
             </div>
 
-            <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-700/60">
-              <div className="text-slate-400 font-medium">30-Minute Rest Break</div>
-              <div className="text-sm font-bold text-white mt-1">Every 8.00 hrs driving</div>
-              <div className="text-[11px] text-slate-400 mt-1">Mandatory 30-min break taken as Off Duty before resuming driving.</div>
-              <div className="text-[10px] font-semibold text-emerald-400 mt-2">STATUS: SCHEDULED AUTOMATICALLY</div>
+            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-200/70">
+              <div className="text-slate-500 font-medium">30-Minute Rest Break</div>
+              <div className="text-sm font-bold text-slate-900 mt-1">Every 8.00 hrs driving</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">Mandatory 30-min break taken as Off Duty before resuming driving.</div>
+              <div className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/70 px-2 py-0.5 rounded-md inline-block mt-2">
+                STATUS: SCHEDULED AUTOMATICALLY
+              </div>
             </div>
 
-            <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-700/60">
-              <div className="text-slate-400 font-medium">70-Hour / 8-Day Cycle</div>
-              <div className="text-sm font-bold text-white mt-1">70.00 hrs max on-duty</div>
-              <div className="text-[11px] text-slate-400 mt-1">Cumulative on-duty time tracks against 70h cycle. Available tomorrow is 70 - Line B.</div>
-              <div className="text-[10px] font-semibold text-indigo-400 mt-2">CURRENT REMAINING: {summary.cycle_remaining_hours || 0} hrs</div>
+            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-200/70">
+              <div className="text-slate-500 font-medium">70-Hour / 8-Day Cycle</div>
+              <div className="text-sm font-bold text-slate-900 mt-1">70.00 hrs max on-duty</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">Cumulative on-duty time tracks against 70h cycle. Available tomorrow is 70 - Line B.</div>
+              <div className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-md inline-block mt-2">
+                CURRENT REMAINING: {summary.cycle_remaining_hours || 0} hrs
+              </div>
             </div>
 
-            <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-700/60">
-              <div className="text-slate-400 font-medium">34-Hour Cycle Restart</div>
-              <div className="text-sm font-bold text-white mt-1">34.00 consecutive hrs rest</div>
-              <div className="text-[11px] text-slate-400 mt-1">Full qualifying rest resets cycle hours to 70. Driving during restart is strictly prohibited.</div>
-              <div className="text-[10px] font-semibold text-purple-400 mt-2">
+            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-200/70">
+              <div className="text-slate-500 font-medium">34-Hour Cycle Restart</div>
+              <div className="text-sm font-bold text-slate-900 mt-1">34.00 consecutive hrs rest</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">Full qualifying rest resets cycle hours to 70. Driving during restart is strictly prohibited.</div>
+              <div className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/70 px-2 py-0.5 rounded-md inline-block mt-2">
                 RESTARTS SCHEDULED: {counts.cycle_restarts || 0}
               </div>
             </div>
 
-            <div className="bg-slate-800/80 rounded-lg p-3 border border-slate-700/60">
-              <div className="text-slate-400 font-medium">Mandatory Fueling</div>
-              <div className="text-sm font-bold text-white mt-1">Every ≤ 1,000 miles</div>
-              <div className="text-[11px] text-slate-400 mt-1">30-minute on-duty fueling stops planned along commercial route corridor.</div>
-              <div className="text-[10px] font-semibold text-amber-400 mt-2">
+            <div className="bg-slate-50/80 rounded-lg p-3 border border-slate-200/70">
+              <div className="text-slate-500 font-medium">Mandatory Fueling</div>
+              <div className="text-sm font-bold text-slate-900 mt-1">Every ≤ 1,000 miles</div>
+              <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">30-minute on-duty fueling stops planned along commercial route corridor.</div>
+              <div className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200/70 px-2 py-0.5 rounded-md inline-block mt-2">
                 FUEL STOPS: {counts.fuel_stops || 0}
               </div>
             </div>
@@ -200,29 +240,30 @@ export default function TripSummary({ summary, isPlanned, validation }) {
           return (
             <div
               key={card.id}
-              className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between"
+              className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between overflow-hidden min-w-0"
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-xs font-semibold text-slate-600 whitespace-nowrap overflow-visible">
+              <div className="flex items-start justify-between gap-2 min-w-0 min-h-[34px]">
+                <span className="text-xs font-semibold text-slate-700 leading-snug">
                   {card.label}
-                </div>
+                </span>
                 <div className={`w-8 h-8 rounded-lg ${card.iconBg} flex items-center justify-center shrink-0`}>
                   <Icon className="w-4 h-4" />
                 </div>
               </div>
 
-              <div className="mt-2.5 mb-1.5">
-                <div className="text-2xl font-bold tracking-tight text-slate-900">
+              <div className="mt-2.5 mb-2 min-w-0">
+                <div className="text-2xl font-bold tracking-tight text-slate-900 truncate">
                   {card.value}
                 </div>
-                <div className="text-xs text-slate-500 mt-0.5 font-normal">
+                <div className="text-xs text-slate-500 mt-0.5 truncate" title={card.subtext}>
                   {card.subtext}
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${card.badgeColor}`}>
-                  {card.badge}
+              <div className="pt-2.5 border-t border-slate-100 flex items-center">
+                <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap ${card.badgeColor}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${card.dotColor}`} />
+                  <span>{card.badge}</span>
                 </span>
               </div>
             </div>

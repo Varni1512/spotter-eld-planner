@@ -58,7 +58,14 @@ export default function EldLogSection({ dailyLogs = [], isPlanned, validation })
 
   const hasDailyDrivingViolation = (hours.driving > 11.001);
   const hasGlobalViolations = validation ? !validation.passed : false;
-  const canApprove = !hasGlobalViolations && logValidation.status !== 'VIOLATION' && !hasDailyDrivingViolation;
+  const isCompliant = !hasGlobalViolations && !hasDailyDrivingViolation && logValidation.status !== 'VIOLATION';
+  const isWarningState = isCompliant && (validation?.status_type === 'WARNING' || validation?.has_sufficient_history === false || recap?.has_sufficient_history === false);
+  const complianceStatusText = validation?.compliance_status || (
+    isCompliant
+      ? (isWarningState ? 'Generated Trip Validated — Historical 70/8 Data Required' : 'HOS Plan Validated')
+      : 'Compliance Issue Detected'
+  );
+  const canApprove = isCompliant;
 
   let approvalBlockReason = null;
   if (hasDailyDrivingViolation) {
@@ -139,6 +146,26 @@ export default function EldLogSection({ dailyLogs = [], isPlanned, validation })
                 Planned Log — Simulation Mode
               </span>
 
+              {/* Synchronized HOS Validation Badge */}
+              <span
+                className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                  !isCompliant
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : isWarningState
+                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+              >
+                {!isCompliant ? (
+                  <AlertTriangle className="w-3 h-3 text-rose-600" />
+                ) : isWarningState ? (
+                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                ) : (
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                )}
+                <span>{complianceStatusText}</span>
+              </span>
+
               {isDayApproved ? (
                 <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
@@ -203,12 +230,20 @@ export default function EldLogSection({ dailyLogs = [], isPlanned, validation })
 
           {!isDayApproved ? (
             <div className="flex flex-wrap items-center gap-2">
-              {approvalBlockReason && (
+              {approvalBlockReason ? (
                 <span className="text-[11px] text-rose-300 bg-rose-950/70 border border-rose-800/80 px-2.5 py-1 rounded flex items-center gap-1.5">
                   <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   <span>{approvalBlockReason}</span>
                 </span>
-              )}
+              ) : isWarningState ? (
+                <span
+                  className="text-[11px] text-amber-200 bg-amber-950/70 border border-amber-700/80 px-2.5 py-1 rounded flex items-center gap-1.5"
+                  title="Daily driving and generated-trip rules were validated. Full 70/8 cycle compliance requires prior 7-day driver logs."
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Note: Generated trip history only (Prior 7-day logs required for full cycle)</span>
+                </span>
+              ) : null}
               <button
                 type="button"
                 onClick={handleApproveDay}
@@ -470,12 +505,17 @@ export default function EldLogSection({ dailyLogs = [], isPlanned, validation })
 
             {/* If insufficient historical data, show explicit alert indicator */}
             {recap.has_sufficient_history === false && (
-              <div className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200/80 flex items-center justify-between">
-                <span className="font-semibold flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  Generated Trip History Only
-                </span>
-                <span className="text-amber-700 font-mono">Trip: {recap.generated_trip_hours || recap.line_b_total_last_7_days}h • Prior: {recap.historical_hours_used || 0}h</span>
+              <div className="text-[11px] text-amber-800 bg-amber-50 px-2.5 py-2 rounded-lg border border-amber-200/80 space-y-1">
+                <div className="flex items-center justify-between font-semibold">
+                  <span className="flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    Generated Trip Validated — Historical 70/8 Data Required
+                  </span>
+                  <span className="text-amber-700 font-mono">Trip: {recap.generated_trip_hours || recap.line_b_total_last_7_days}h</span>
+                </div>
+                <p className="text-[10px] text-amber-700 leading-tight">
+                  Daily driving and generated-trip rules were validated. Full 70/8 cycle compliance requires prior 7-day driver logs.
+                </p>
               </div>
             )}
 

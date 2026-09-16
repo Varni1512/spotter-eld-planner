@@ -131,9 +131,12 @@ class HOSViolation:
 @dataclass
 class HOSValidationResult:
     passed: bool
-    compliance_status: str # "HOS Plan Validated" or "Compliance Issue Detected"
+    compliance_status: str # "HOS Plan Validated", "Generated Trip Validated — Historical 70/8 Data Required", or "Compliance Issue Detected"
     violations: List[HOSViolation] = field(default_factory=list)
     warnings: List[HOSViolation] = field(default_factory=list)
+    has_sufficient_history: bool = True
+    status_type: str = "VALIDATED" # "VALIDATED", "WARNING", or "ERROR"
+    explanation: str = ""
 
 class HOSConflictError(Exception):
     """Raised when an illegal schedule or activity is detected in the HOS plan."""
