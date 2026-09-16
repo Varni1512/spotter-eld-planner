@@ -34,21 +34,6 @@ export default function Header({ onReset, isPlanned, isBackendConnected }) {
               <span className="text-slate-600">Spotter Fleet Logistics</span>
             </div>
 
-            {/* Backend connection status */}
-            <div
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md font-medium border ${
-                isBackendConnected
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                  : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isBackendConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                }`}
-              ></span>
-              <span>{isBackendConnected ? 'Backend Connected' : 'Connecting to API...'}</span>
-            </div>
 
             {isPlanned && (
               <button
