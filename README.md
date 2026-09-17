@@ -426,23 +426,7 @@ dist/assets/index.js            439.46 kB
 
 ---
 
-## 13. Screenshots / Demo
-
-<!--
-TODO: Add screenshots to the repository under docs/screenshots/ and link them here:
-1. docs/screenshots/01_route_planner_dashboard.png - Main planner dashboard with input form and metrics cards
-2. docs/screenshots/02_map_and_timeline.png - Leaflet interactive road route and scheduled stops timeline
-3. docs/screenshots/03_daily_driver_log.png - 24-hour ELD SVG log sheet with 15-minute resolution step chart
-4. docs/screenshots/04_rolling_recap.png - 70-hour / 8-day rolling driver recap calculation table
-5. docs/screenshots/05_insufficient_history_warning.png - Informational warning banner when historical data is absent
-6. docs/screenshots/06_driver_review_approval.png - Driver sign-off and approval modal
--->
-
-*Screenshots will be placed here once uploaded to the repository.*
-
----
-
-## 14. Running Locally
+## 13. Running Locally
 
 ### Prerequisites
 - Python 3.11 or 3.12
@@ -490,7 +474,7 @@ The frontend application will be available at `http://localhost:5173`.
 
 ---
 
-## 15. Environment Variables
+## 14. Environment Variables
 
 Create a `.env` file inside the `backend/` directory for local customization:
 
@@ -507,7 +491,7 @@ Create a `.env` file inside the `backend/` directory for local customization:
 
 ---
 
-## 16. Project Structure
+## 15. Project Structure
 
 ```text
 spotter-eld-planner/
